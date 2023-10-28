@@ -1,4 +1,4 @@
-use std::io::{stdin, stdout, Write};
+use std::{io::{stdin, stdout, Write}, process::exit};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{tcp::ReadHalf, tcp::WriteHalf, TcpStream},
@@ -50,6 +50,7 @@ async fn start_tcp_read_write(
                     }
                     Err(e) => {
                         eprintln!("Error when reading from stream: {}", e);
+                        exit(0)
                     }
                 }
             }
