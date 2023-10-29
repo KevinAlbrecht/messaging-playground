@@ -1,4 +1,7 @@
-use std::{io::{stdin, stdout, Write}, process::exit};
+use std::{
+    io::{stdin, stdout, Write},
+    process::exit,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{tcp::ReadHalf, tcp::WriteHalf, TcpStream},
@@ -11,16 +14,23 @@ const QUEUE_SIZE: usize = 16;
 
 #[tokio::main]
 async fn main() {
+    let set_username_line: String = ask_username();
+
     let mut stream = TcpStream::connect(TCP_ADDR).await.unwrap();
     let (reader, mut writer) = stream.split();
     let (tx, rx) = mpsc::channel(QUEUE_SIZE);
+
+    writer
+        .write_all(set_username_line.as_bytes())
+        .await
+        .expect("Failed to write to stream");
+    stdout().flush().expect("Failed to flush stdout");
 
     start_reading_user_entries(tx);
     start_tcp_read_write(reader, &mut writer, rx).await;
 }
 
 fn start_reading_user_entries(tx: mpsc::Sender<String>) {
-    // Tâche pour lire les entrées de l'utilisateur
     tokio::spawn(async move {
         loop {
             let input = read_user_entry().await;
@@ -46,7 +56,7 @@ async fn start_tcp_read_write(
                     }
                     Ok(len) => {
                         let received = String::from_utf8_lossy(&read_buffer[..len]);
-                        println!("{}: {}", "Toto", received);
+                        println!("{}", received);
                     }
                     Err(e) => {
                         eprintln!("Error when reading from stream: {}", e);
@@ -71,8 +81,22 @@ async fn read_user_entry() -> String {
         stdin()
             .read_line(&mut buffer)
             .expect("Failed to read from stdin");
+        print!("\x1b[1A\x1b[K");
+
         buffer
     })
     .await
     .expect("Failed to join task")
+}
+
+fn ask_username() -> String {
+    let mut username = String::new();
+    println!("Enter your username: ");
+    stdin().read_line(&mut username).unwrap();
+
+    let mut name = "/nick ".to_string();
+    name.push_str(username.trim());
+    name.push_str("\r\n");
+
+    name
 }
