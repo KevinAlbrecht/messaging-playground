@@ -8,6 +8,15 @@ use tokio::{
     sync::mpsc,
 };
 
+pub mod chat {
+    pub mod message {
+        include!(concat!(env!("OUT_DIR"), "/chat.message.rs"));
+    }
+}
+
+use chat::message::{self, message::Type};
+use prost::Message;
+
 const TCP_ADDR: &str = "localhost:3000";
 const BUF_SIZE: usize = 4096;
 const QUEUE_SIZE: usize = 16;
@@ -55,8 +64,16 @@ async fn start_tcp_read_write(
                         return;
                     }
                     Ok(len) => {
-                        let received = String::from_utf8_lossy(&read_buffer[..len]);
-                        println!("{}", received);
+                        // let received = String::from_utf8_lossy(&read_buffer[..len]);
+                        let received = message::Message::decode(&read_buffer[..len]).unwrap();
+
+                        // println!("msg:{}\nsender:{}\n,mgs_type:{}\nrecipient:{}",
+                        // received.message.to_string(),
+                        // received.sender.to_string(),
+                        // received.msg_type.to_string(),
+                        // if received.recipient.is_some() {received.recipient.unwrap()} else {"no recipiend".to_string()});
+
+                        println!("{}: {}", received.sender, received.message);
                     }
                     Err(e) => {
                         eprintln!("Error when reading from stream: {}", e);

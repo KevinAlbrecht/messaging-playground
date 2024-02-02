@@ -9,6 +9,15 @@ use tokio::{
     },
 };
 
+pub mod chat {
+    pub mod message {
+        include!(concat!(env!("OUT_DIR"), "/chat.message.rs"));
+    }
+}
+
+use chat::message::{self, message::Type};
+use prost::Message;
+
 struct Client {
     name: String,
     // stream: TcpStream,
@@ -71,22 +80,30 @@ fn handle_new_client(
                     line.clear();
                 }
                 result = rx.recv()=>{
-                    let (mut msg, sender_addr,to_addr) = result.unwrap();
+                    let (msg, sender_addr,to_addr) = result.unwrap();
 
                     let clients_guard = clients.lock().await;
                     let current_client = clients_guard.get(&sender_addr.to_string()).unwrap().name.clone();
 
-                    msg = format!("{}: {}", current_client, msg);
-
                     if to_addr.is_some() {
                         println!("to_addr: {}",to_addr.unwrap());
                         let to_addr = to_addr.unwrap();
-                        if to_addr == addr{
-                            writer.write_all(msg.as_bytes()).await.unwrap();
+
+                        if to_addr != addr{
+                            return ()
                         }
-                    }else{
-                        writer.write_all(msg.as_bytes()).await.unwrap();
                     }
+
+                    let message = message::Message {
+                        message: msg,
+                        sender: current_client,
+                        msg_type: Type::Broadcast as i32,
+                        recipient: None,
+                    };
+
+                    let mut buf = Vec::new();
+                    message.encode(&mut buf).unwrap();
+                    writer.write_all(&buf).await.unwrap();
                 }
             }
         }
