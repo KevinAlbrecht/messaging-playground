@@ -24,6 +24,8 @@ struct Client {
     // rx: Receiver<(String, SocketAddr)>,
 }
 
+const BUF_SIZE: usize = 4096;
+
 #[tokio::main]
 async fn main() {
     let clients: Arc<Mutex<HashMap<String, Client>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -54,31 +56,38 @@ fn handle_new_client(
 
         let (reader, mut writer) = socket.split();
         let mut reader = BufReader::new(reader);
-        let mut line = String::new();
 
         loop {
+            let mut read_buffer = [0; BUF_SIZE];
+
             tokio::select! {
-                read = reader.read_line(&mut line) =>{
-                    if read.unwrap() == 0 {
-                        println!("Client {} disconnected", addr);
-                        break;
-                    }
+                read_length = reader.read(&mut read_buffer) => {
+                    match read_length {
+                        Ok(0) => {
+                            println!("Connection lost from client.");
+                            return;
+                        }
+                        Ok(len) => {
+                            let received = message::Message::decode(&read_buffer[..len]).unwrap();
+                            println!("{}: {}", addr,received.message);
+                            let trimmed = received.message.trim().to_string();
 
-                    println!("{}: {}", addr,line);
-                    let trimmed = line.trim().to_string();
-
-                    if !trimmed.starts_with("/"){
-                        tx.send((trimmed,addr,None)).unwrap();
-                    }else{
-                        println!("commande: {}-{}",trimmed,addr);
-                        let response = handle_command(trimmed, addr.to_string(), clients.clone()).await;
-                        if let Some(msg) = response{
-                            tx.send((msg,addr,Some(addr))).unwrap();
+                            if !trimmed.starts_with("/"){
+                                tx.send((trimmed,addr,None)).unwrap();
+                            }else{
+                                println!("commande: {}-{}",trimmed,addr);
+                                let response = handle_command(trimmed, addr.to_string(), clients.clone()).await;
+                                if let Some(msg) = response{
+                                    tx.send((msg,addr,Some(addr))).unwrap();
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("Error when reading from stream: {}", e);
                         }
                     }
+                },
 
-                    line.clear();
-                }
                 result = rx.recv()=>{
                     let (msg, sender_addr,to_addr) = result.unwrap();
 
@@ -90,7 +99,7 @@ fn handle_new_client(
                         let to_addr = to_addr.unwrap();
 
                         if to_addr != addr{
-                            return ()
+                            continue;
                         }
                     }
 
