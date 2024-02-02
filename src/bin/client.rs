@@ -8,6 +8,15 @@ use tokio::{
     sync::mpsc,
 };
 
+pub mod chat {
+    pub mod message {
+        include!(concat!(env!("OUT_DIR"), "/chat.message.rs"));
+    }
+}
+
+use chat::message::{self, message::Type};
+use prost::Message;
+
 const TCP_ADDR: &str = "localhost:3000";
 const BUF_SIZE: usize = 4096;
 const QUEUE_SIZE: usize = 16;
@@ -20,10 +29,23 @@ async fn main() {
     let (reader, mut writer) = stream.split();
     let (tx, rx) = mpsc::channel(QUEUE_SIZE);
 
+    let set_username_command = message::Message {
+        message: set_username_line,
+        sender: String::new(),
+        msg_type: Type::Command as i32,
+        recipient: None,
+    }
+    .encode(&mut Vec::new())
+    .unwrap();
+    let mut set_username_buf = Vec::new();
+
+    set_username_command.encode(&mut set_username_buf).unwrap();
+
     writer
-        .write_all(set_username_line.as_bytes())
+        .write_all(&set_username_buf)
         .await
         .expect("Failed to write to stream");
+
     stdout().flush().expect("Failed to flush stdout");
 
     start_reading_user_entries(tx);
@@ -55,8 +77,8 @@ async fn start_tcp_read_write(
                         return;
                     }
                     Ok(len) => {
-                        let received = String::from_utf8_lossy(&read_buffer[..len]);
-                        println!("{}", received);
+                        let received = message::Message::decode(&read_buffer[..len]).unwrap();
+                        println!("{}: {}", received.sender, received.message);
                     }
                     Err(e) => {
                         eprintln!("Error when reading from stream: {}", e);
@@ -66,7 +88,16 @@ async fn start_tcp_read_write(
             }
             input_opt = rx.recv() => {
                 if let Some(input) = input_opt {
-                    writer.write_all(input.as_bytes()).await.expect("Failed to write to stream");
+                    let mut buf = Vec::new();
+
+                    message::Message {
+                        message: input,
+                        sender: String::new(),
+                        msg_type: Type::Broadcast as i32,
+                        recipient: None,
+                    }.encode(&mut buf).unwrap();
+
+                    writer.write_all(&buf).await.expect("Failed to write to stream");
                     stdout().flush().expect("Failed to flush stdout");
                 }
             }

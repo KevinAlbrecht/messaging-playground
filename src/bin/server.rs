@@ -9,11 +9,22 @@ use tokio::{
     },
 };
 
+pub mod chat {
+    pub mod message {
+        include!(concat!(env!("OUT_DIR"), "/chat.message.rs"));
+    }
+}
+
+use chat::message::{self, message::Type};
+use prost::Message;
+
 struct Client {
     name: String,
     // stream: TcpStream,
     // rx: Receiver<(String, SocketAddr)>,
 }
+
+const BUF_SIZE: usize = 4096;
 
 #[tokio::main]
 async fn main() {
@@ -45,48 +56,63 @@ fn handle_new_client(
 
         let (reader, mut writer) = socket.split();
         let mut reader = BufReader::new(reader);
-        let mut line = String::new();
 
         loop {
+            let mut read_buffer = [0; BUF_SIZE];
+
             tokio::select! {
-                read = reader.read_line(&mut line) =>{
-                    if read.unwrap() == 0 {
-                        println!("Client {} disconnected", addr);
-                        break;
-                    }
+                read_length = reader.read(&mut read_buffer) => {
+                    match read_length {
+                        Ok(0) => {
+                            println!("Connection lost from client.");
+                            return;
+                        }
+                        Ok(len) => {
+                            let received = message::Message::decode(&read_buffer[..len]).unwrap();
+                            println!("{}: {}", addr,received.message);
+                            let trimmed = received.message.trim().to_string();
 
-                    println!("{}: {}", addr,line);
-                    let trimmed = line.trim().to_string();
-
-                    if !trimmed.starts_with("/"){
-                        tx.send((trimmed,addr,None)).unwrap();
-                    }else{
-                        println!("commande: {}-{}",trimmed,addr);
-                        let response = handle_command(trimmed, addr.to_string(), clients.clone()).await;
-                        if let Some(msg) = response{
-                            tx.send((msg,addr,Some(addr))).unwrap();
+                            if !trimmed.starts_with("/"){
+                                tx.send((trimmed,addr,None)).unwrap();
+                            }else{
+                                println!("commande: {}-{}",trimmed,addr);
+                                let response = handle_command(trimmed, addr.to_string(), clients.clone()).await;
+                                if let Some(msg) = response{
+                                    tx.send((msg,addr,Some(addr))).unwrap();
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("Error when reading from stream: {}", e);
                         }
                     }
+                },
 
-                    line.clear();
-                }
                 result = rx.recv()=>{
-                    let (mut msg, sender_addr,to_addr) = result.unwrap();
+                    let (msg, sender_addr,to_addr) = result.unwrap();
 
                     let clients_guard = clients.lock().await;
                     let current_client = clients_guard.get(&sender_addr.to_string()).unwrap().name.clone();
 
-                    msg = format!("{}: {}", current_client, msg);
-
                     if to_addr.is_some() {
                         println!("to_addr: {}",to_addr.unwrap());
                         let to_addr = to_addr.unwrap();
-                        if to_addr == addr{
-                            writer.write_all(msg.as_bytes()).await.unwrap();
+
+                        if to_addr != addr{
+                            continue;
                         }
-                    }else{
-                        writer.write_all(msg.as_bytes()).await.unwrap();
                     }
+
+                    let message = message::Message {
+                        message: msg,
+                        sender: current_client,
+                        msg_type: Type::Broadcast as i32,
+                        recipient: None,
+                    };
+
+                    let mut buf = Vec::new();
+                    message.encode(&mut buf).unwrap();
+                    writer.write_all(&buf).await.unwrap();
                 }
             }
         }

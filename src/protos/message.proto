@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package chat.message;
+
+message Message {
+    enum Type {
+        COMMAND=0;
+        BROADCAST=1;
+        PRIVATE=2;
+    }
+
+    Type msg_type = 1;
+    string sender = 2;
+    optional string recipient =3;
+    string message=4;
+}
