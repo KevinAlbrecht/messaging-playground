@@ -25,6 +25,7 @@ struct Client {
 }
 
 const BUF_SIZE: usize = 4096;
+const MAX_MESSAGE_SIZE: usize = 2048;
 
 #[tokio::main]
 async fn main() {
@@ -69,17 +70,20 @@ fn handle_new_client(
                         }
                         Ok(len) => {
                             let received = message::Message::decode(&read_buffer[..len]).unwrap();
-                            println!("{}: {}", addr,received.message);
 
-                            let trimmed = received.message.trim().to_string();
+                            let mut msg= received.message.trim().to_string();
+                            if msg.len() > MAX_MESSAGE_SIZE{
+                               msg.truncate(MAX_MESSAGE_SIZE);
+                               msg.push_str("...\n\n Message too long");
+                            }
 
-                            if !trimmed.starts_with("/"){
-                                tx.send((trimmed,addr,None)).unwrap();
+                            if !msg.starts_with("/"){
+                                tx.send((msg,addr,None)).unwrap();
                             }else{
-                                println!("commande: {}-{}",trimmed,addr);
-                                let response = handle_command(trimmed, addr.to_string(), clients.clone()).await;
-                                if let Some(msg) = response{
-                                    tx.send((msg,addr,Some(addr))).unwrap();
+                                println!("commande: {}-{}",msg,addr);
+                                let response = handle_command(msg, addr.to_string(), clients.clone()).await;
+                                if let Some(response_msg) = response{
+                                    tx.send((response_msg,addr,Some(addr))).unwrap();
                                 }
                             }
                         },
