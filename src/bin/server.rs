@@ -195,7 +195,7 @@ async fn list_clients(clients: Arc<Mutex<HashMap<String, Client>>>) -> String {
     let clients_guard = clients.lock().await;
 
     let mut list = String::new();
-    for (addr, current_client) in clients_guard.iter() {
+    for (_, current_client) in clients_guard.iter() {
         list.push_str(&current_client.name);
         list.push_str("\n");
     }

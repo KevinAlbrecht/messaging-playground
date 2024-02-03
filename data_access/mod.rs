@@ -8,7 +8,6 @@ pub mod sqlite_provider {
             include!(concat!(env!("OUT_DIR"), "/chat.message.rs"));
         }
     }
-    use chat::message::{self, message::Type};
 
     pub struct SqliteProvider {
         conn: Connection,
