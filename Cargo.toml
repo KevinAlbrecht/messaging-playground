@@ -10,6 +10,11 @@ tokio = { version = "1.32.0", features = ["full"] }
 prost = "0.12"
 prost-types = "0.12"
 arboard = "3.3.0"
+rusqlite = "0.30.0"
 
 [build-dependencies]
 prost-build = { version = "0.12" }
+
+[lib]
+name = "data_access"
+path = "data_access/mod.rs"

@@ -18,6 +18,8 @@ pub mod chat {
 use chat::message::{self, message::Type};
 use prost::Message;
 
+use data_access::sqlite_provider::SqliteProvider;
+
 struct Client {
     name: String,
     // stream: TcpStream,
@@ -26,13 +28,21 @@ struct Client {
 
 const BUF_SIZE: usize = 4096;
 const MAX_MESSAGE_SIZE: usize = 2048;
+const TRUNATED_MESSAGE_SIZE: usize = 256;
 
 #[tokio::main]
 async fn main() {
+    let sqlite_provider = match SqliteProvider::new() {
+        Ok(provider) => provider,
+        Err(e) => {
+            println!("Error when creating sqlite provider: {}", e);
+            return;
+        }
+    };
+
+    let arc_sqlite_provider = Arc::new(Mutex::new(sqlite_provider));
     let clients: Arc<Mutex<HashMap<String, Client>>> = Arc::new(Mutex::new(HashMap::new()));
-
     let listener = TcpListener::bind("localhost:3000").await.unwrap();
-
     let (tx, _rx) = broadcast::channel::<(String, SocketAddr, Option<SocketAddr>)>(10);
 
     loop {
@@ -40,8 +50,9 @@ async fn main() {
         let tx = tx.clone();
         let rx = tx.subscribe();
         let clients_clone = clients.clone();
+        let arc_sqlite_provider = arc_sqlite_provider.clone();
 
-        handle_new_client(socket, addr, tx, rx, clients_clone);
+        handle_new_client(socket, addr, tx, rx, clients_clone, arc_sqlite_provider);
     }
 }
 
@@ -51,6 +62,7 @@ fn handle_new_client(
     tx: Sender<(String, SocketAddr, Option<SocketAddr>)>,
     mut rx: Receiver<(String, SocketAddr, Option<SocketAddr>)>,
     clients: Arc<Mutex<HashMap<String, Client>>>,
+    sqlite_provider: Arc<Mutex<SqliteProvider>>,
 ) {
     tokio::spawn(async move {
         insert_client(addr.to_string(), clients.clone()).await;
@@ -70,15 +82,25 @@ fn handle_new_client(
                         }
                         Ok(len) => {
                             let received = message::Message::decode(&read_buffer[..len]).unwrap();
+                            let new_message_id = sqlite_provider.lock().await
+                                .insert_message(
+                                    &received.message,
+                                    &received.sender,
+                                    &received.recipient.unwrap_or_default(),
+                                    received.msg_type,
+                                )
+                                .unwrap();
 
                             let mut msg= received.message.trim().to_string();
+
                             if msg.len() > MAX_MESSAGE_SIZE{
-                               msg.truncate(MAX_MESSAGE_SIZE);
-                               msg.push_str("...\n\n Message too long");
+                               msg.truncate(TRUNATED_MESSAGE_SIZE);
+                               msg.push_str(&format!("...\n\n Message too long, full message visible with id: {}.",new_message_id));
                             }
 
                             if !msg.starts_with("/"){
                                 tx.send((msg,addr,None)).unwrap();
+
                             }else{
                                 println!("commande: {}-{}",msg,addr);
                                 let response = handle_command(msg, addr.to_string(), clients.clone()).await;
