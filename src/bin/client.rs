@@ -1,4 +1,6 @@
 use arboard::Clipboard;
+use messaging_playground::{client, shared};
+use prost::Message;
 use std::{
     io::{stdin, stdout, Write},
     process::exit,
@@ -8,10 +10,6 @@ use tokio::{
     net::{tcp::ReadHalf, tcp::WriteHalf, TcpStream},
     sync::mpsc,
 };
-
-use messaging_playground::shared;
-
-use prost::Message;
 
 const TCP_ADDR: &str = "localhost:3000";
 const BUF_SIZE: usize = 4096;
@@ -127,17 +125,19 @@ fn ask_username() -> String {
 }
 
 fn handle_command(input: String) -> String {
-    if !input.starts_with('/') {
-        return input;
+    if input.starts_with('/') {
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let command_str = parts[0];
+
+        if let Some(command) = client::Command::from_str(command_str) {
+            return match command {
+                client::Command::Paste => {
+                    let mut clipboard = Clipboard::new().unwrap();
+                    clipboard.get_text().unwrap()
+                }
+            };
+        }
     }
 
-    let potential_command = input.replace("\n", " ");
-    let parts = potential_command.split(" ").collect::<Vec<&str>>();
-    match parts[0] {
-        "/paste" => {
-            let mut clipboard = Clipboard::new().unwrap();
-            return clipboard.get_text().unwrap();
-        }
-        _ => input,
-    }
+    input
 }

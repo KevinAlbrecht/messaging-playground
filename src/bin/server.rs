@@ -1,4 +1,4 @@
-use messaging_playground::{shared, sqlite};
+use messaging_playground::{server, shared, sqlite};
 use prost::Message;
 use std::net::SocketAddr;
 use std::{collections::HashMap, sync::Arc};
@@ -96,6 +96,7 @@ fn handle_new_client(
                             }else{
                                 println!("commande: {}-{}",msg,addr);
                                 let response = handle_command(msg, addr.to_string(), clients.clone(),sqlite_provider.clone()).await;
+
                                 if let Some(response_msg) = response{
                                     tx.send((response_msg,Some(addr),Some(addr))).unwrap();
                                 }
@@ -143,29 +144,33 @@ fn handle_new_client(
 }
 
 async fn handle_command(
-    command: String,
+    input: String,
     sender_addr: String,
     clients: Arc<Mutex<HashMap<String, Client>>>,
     sql_provider: Arc<Mutex<sqlite::SqliteProvider>>,
 ) -> Option<String> {
-    match command.split(" ").collect::<Vec<&str>>()[0] {
-        "/nick" => {
-            let new_name = command[6..].to_string().to_string();
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    let command_str = parts[0];
 
-            update_nickname(new_name, clients, sender_addr).await;
-            None
-        }
-        "/list" => {
-            let list = list_clients(clients).await;
-            Some(list)
-        }
-        "/read" => {
-            let id = command[6..].to_string().parse::<u16>().unwrap();
-            let message = get_message_by_id(id, sql_provider).await;
-            message
-        }
-        _ => None,
+    if let Some(command) = server::Command::from_str(command_str) {
+        return match command {
+            server::Command::Nick => {
+                let new_name = parts.get(1).unwrap().to_string();
+                update_nickname(new_name, clients, sender_addr).await;
+                None
+            }
+            server::Command::List => {
+                let list = list_clients(clients).await;
+                Some(list)
+            }
+            server::Command::Read => {
+                let id = parts[1].to_string().parse::<u16>().unwrap();
+                let message = get_message_by_id(id, sql_provider).await;
+                message
+            }
+        };
     }
+    None
 }
 
 // TODO return a Message instead of a String
