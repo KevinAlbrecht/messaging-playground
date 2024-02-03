@@ -43,7 +43,7 @@ async fn main() {
     let arc_sqlite_provider = Arc::new(Mutex::new(sqlite_provider));
     let clients: Arc<Mutex<HashMap<String, Client>>> = Arc::new(Mutex::new(HashMap::new()));
     let listener = TcpListener::bind("localhost:3000").await.unwrap();
-    let (tx, _rx) = broadcast::channel::<(String, SocketAddr, Option<SocketAddr>)>(10);
+    let (tx, _rx) = broadcast::channel::<(String, Option<SocketAddr>, Option<SocketAddr>)>(10);
 
     loop {
         let (socket, addr) = listener.accept().await.unwrap();
@@ -59,16 +59,17 @@ async fn main() {
 fn handle_new_client(
     mut socket: TcpStream,
     addr: SocketAddr,
-    tx: Sender<(String, SocketAddr, Option<SocketAddr>)>,
-    mut rx: Receiver<(String, SocketAddr, Option<SocketAddr>)>,
+    tx: Sender<(String, Option<SocketAddr>, Option<SocketAddr>)>,
+    mut rx: Receiver<(String, Option<SocketAddr>, Option<SocketAddr>)>,
     clients: Arc<Mutex<HashMap<String, Client>>>,
     sqlite_provider: Arc<Mutex<SqliteProvider>>,
 ) {
     tokio::spawn(async move {
-        insert_client(addr.to_string(), clients.clone()).await;
-
         let (reader, mut writer) = socket.split();
         let mut reader = BufReader::new(reader);
+
+        let annonce_msg = insert_client(addr.to_string(), clients.clone()).await;
+        tx.send((annonce_msg.clone(), None, None)).unwrap();
 
         loop {
             let mut read_buffer = [0; BUF_SIZE];
@@ -77,7 +78,8 @@ fn handle_new_client(
                 read_length = reader.read(&mut read_buffer) => {
                     match read_length {
                         Ok(0) => {
-                            println!("Connection lost from client.");
+                            let annonce = remove_client(addr.to_string(), clients.clone()).await;
+                            tx.send((annonce.clone(), None, None)).unwrap();
                             return;
                         }
                         Ok(len) => {
@@ -99,13 +101,13 @@ fn handle_new_client(
                             }
 
                             if !msg.starts_with("/"){
-                                tx.send((msg,addr,None)).unwrap();
+                                tx.send((msg,Some(addr),None)).unwrap();
 
                             }else{
                                 println!("commande: {}-{}",msg,addr);
                                 let response = handle_command(msg, addr.to_string(), clients.clone()).await;
                                 if let Some(response_msg) = response{
-                                    tx.send((response_msg,addr,Some(addr))).unwrap();
+                                    tx.send((response_msg,Some(addr),Some(addr))).unwrap();
                                 }
                             }
                         },
@@ -118,8 +120,12 @@ fn handle_new_client(
                 result = rx.recv()=>{
                     let (msg, sender_addr,to_addr) = result.unwrap();
 
-                    let clients_guard = clients.lock().await;
-                    let current_client = clients_guard.get(&sender_addr.to_string()).unwrap().name.clone();
+                    let mut current_client:String= "Server".to_string();
+
+                    if let Some(sender_address) = sender_addr {
+                        let clients_guard = clients.lock().await;
+                        current_client = clients_guard.get(&sender_address.to_string()).unwrap().name.clone();
+                    }
 
                     if to_addr.is_some() {
                         println!("to_addr: {}",to_addr.unwrap());
@@ -166,19 +172,36 @@ async fn handle_command(
     }
 }
 
-async fn insert_client(addr: String, clients: Arc<Mutex<HashMap<String, Client>>>) {
-    println!("Client {} connected", addr);
-
+async fn insert_client(addr: String, clients: Arc<Mutex<HashMap<String, Client>>>) -> String {
     let mut clients_guard = clients.lock().await;
-
     clients_guard.insert(
         addr.to_string(),
         Client {
             name: addr.to_string(),
-            // stream: socket,
-            // rx,
         },
     );
+
+    println!("Client {}  joined", addr);
+
+    format!("{} joined", addr)
+}
+
+async fn remove_client(addr: String, clients: Arc<Mutex<HashMap<String, Client>>>) -> String {
+    let current_client_name: String;
+
+    let mut clients_guard = clients.lock().await;
+    {
+        current_client_name = clients_guard.get(&addr.to_string()).unwrap().name.clone();
+    }
+
+    println!(
+        "Client {} alias \"{}\" disconnected",
+        addr, current_client_name
+    );
+
+    clients_guard.remove(&addr.to_string());
+
+    format!("{} left", current_client_name)
 }
 
 async fn update_nickname(
