@@ -1,3 +1,5 @@
+use messaging_playground::{shared, sqlite};
+use prost::Message;
 use std::net::SocketAddr;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
@@ -8,17 +10,6 @@ use tokio::{
         Mutex,
     },
 };
-
-pub mod chat {
-    pub mod message {
-        include!(concat!(env!("OUT_DIR"), "/chat.message.rs"));
-    }
-}
-
-use chat::message::{self, message::Type};
-use prost::Message;
-
-use data_access::sqlite_provider::SqliteProvider;
 
 struct Client {
     name: String,
@@ -32,7 +23,7 @@ const TRUNATED_MESSAGE_SIZE: usize = 256;
 
 #[tokio::main]
 async fn main() {
-    let sqlite_provider = match SqliteProvider::new() {
+    let sqlite_provider = match sqlite::SqliteProvider::new() {
         Ok(provider) => provider,
         Err(e) => {
             println!("Error when creating sqlite provider: {}", e);
@@ -62,7 +53,7 @@ fn handle_new_client(
     tx: Sender<(String, Option<SocketAddr>, Option<SocketAddr>)>,
     mut rx: Receiver<(String, Option<SocketAddr>, Option<SocketAddr>)>,
     clients: Arc<Mutex<HashMap<String, Client>>>,
-    sqlite_provider: Arc<Mutex<SqliteProvider>>,
+    sqlite_provider: Arc<Mutex<sqlite::SqliteProvider>>,
 ) {
     tokio::spawn(async move {
         let (reader, mut writer) = socket.split();
@@ -83,7 +74,7 @@ fn handle_new_client(
                             return;
                         }
                         Ok(len) => {
-                            let received = message::Message::decode(&read_buffer[..len]).unwrap();
+                            let received = shared::models::Message::decode(&read_buffer[..len]).unwrap();
                             let new_message_id = sqlite_provider.lock().await
                                 .insert_message(
                                     &received.message,
@@ -102,10 +93,9 @@ fn handle_new_client(
 
                             if !msg.starts_with("/"){
                                 tx.send((msg,Some(addr),None)).unwrap();
-
                             }else{
                                 println!("commande: {}-{}",msg,addr);
-                                let response = handle_command(msg, addr.to_string(), clients.clone()).await;
+                                let response = handle_command(msg, addr.to_string(), clients.clone(),sqlite_provider.clone()).await;
                                 if let Some(response_msg) = response{
                                     tx.send((response_msg,Some(addr),Some(addr))).unwrap();
                                 }
@@ -136,10 +126,10 @@ fn handle_new_client(
                         }
                     }
 
-                    let message = message::Message {
+                    let message = shared::models::Message {
                         message: msg,
                         sender: current_client,
-                        msg_type: Type::Broadcast as i32,
+                        msg_type: shared::models::message::Type::Broadcast as i32,
                         recipient: None,
                     };
 
@@ -156,6 +146,7 @@ async fn handle_command(
     command: String,
     sender_addr: String,
     clients: Arc<Mutex<HashMap<String, Client>>>,
+    sql_provider: Arc<Mutex<sqlite::SqliteProvider>>,
 ) -> Option<String> {
     match command.split(" ").collect::<Vec<&str>>()[0] {
         "/nick" => {
@@ -168,8 +159,21 @@ async fn handle_command(
             let list = list_clients(clients).await;
             Some(list)
         }
+        "/read" => {
+            let id = command[6..].to_string().parse::<u16>().unwrap();
+            let message = get_message_by_id(id, sql_provider).await;
+            message
+        }
         _ => None,
     }
+}
+
+// TODO return a Message instead of a String
+async fn get_message_by_id(
+    id: u16,
+    sqlite_provider: Arc<Mutex<sqlite::SqliteProvider>>,
+) -> Option<String> {
+    sqlite_provider.lock().await.get_message_by_id(id)
 }
 
 async fn insert_client(addr: String, clients: Arc<Mutex<HashMap<String, Client>>>) -> String {

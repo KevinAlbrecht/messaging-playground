@@ -8,13 +8,9 @@ use tokio::{
     net::{tcp::ReadHalf, tcp::WriteHalf, TcpStream},
     sync::mpsc,
 };
-pub mod chat {
-    pub mod message {
-        include!(concat!(env!("OUT_DIR"), "/chat.message.rs"));
-    }
-}
 
-use chat::message::{self, message::Type};
+use messaging_playground::shared;
+
 use prost::Message;
 
 const TCP_ADDR: &str = "localhost:3000";
@@ -29,11 +25,11 @@ async fn main() {
 
     let set_username_line: String = ask_username();
     let mut buf: Vec<u8> = Vec::new();
-    
-    message::Message {
+
+    shared::models::Message {
         message: set_username_line,
         sender: String::new(),
-        msg_type: Type::Command as i32,
+        msg_type: shared::models::message::Type::Command as i32,
         recipient: None,
     }
     .encode(&mut buf)
@@ -75,7 +71,7 @@ async fn start_tcp_read_write(
                         return;
                     }
                     Ok(len) => {
-                        let received = message::Message::decode(&read_buffer[..len]).unwrap();
+                        let received = shared::models::Message::decode(&read_buffer[..len]).unwrap();
                         println!("{}: {}", received.sender, received.message);
                     }
                     Err(e) => {
@@ -88,10 +84,10 @@ async fn start_tcp_read_write(
                 if let Some(input) = input_opt {
                     let mut buf = Vec::new();
 
-                    message::Message {
+                    shared::models::Message {
                         message: input,
                         sender: String::new(),
-                        msg_type: Type::Broadcast as i32,
+                        msg_type: shared::models::message::Type::Broadcast as i32,
                         recipient: None,
                     }.encode(&mut buf).unwrap();
 
@@ -131,14 +127,12 @@ fn ask_username() -> String {
 }
 
 fn handle_command(input: String) -> String {
-
     if !input.starts_with('/') {
         return input;
     }
 
     let potential_command = input.replace("\n", " ");
     let parts = potential_command.split(" ").collect::<Vec<&str>>();
-
     match parts[0] {
         "/paste" => {
             let mut clipboard = Clipboard::new().unwrap();

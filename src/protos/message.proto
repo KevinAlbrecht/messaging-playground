@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package chat.message;
+package models.message;
 
 message Message {
     enum Type {
