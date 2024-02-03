@@ -1,3 +1,4 @@
+use arboard::Clipboard;
 use std::{
     io::{stdin, stdout, Write},
     process::exit,
@@ -7,7 +8,6 @@ use tokio::{
     net::{tcp::ReadHalf, tcp::WriteHalf, TcpStream},
     sync::mpsc,
 };
-
 pub mod chat {
     pub mod message {
         include!(concat!(env!("OUT_DIR"), "/chat.message.rs"));
@@ -53,7 +53,7 @@ async fn main() {
 fn start_reading_user_entries(tx: mpsc::Sender<String>) {
     tokio::spawn(async move {
         loop {
-            let input = read_user_entry().await;
+            let input = handle_command(read_user_entry().await).trim().to_string();
             tx.send(input).await.expect("Failed to send user input");
         }
     });
@@ -128,4 +128,22 @@ fn ask_username() -> String {
     name.push_str("\r\n");
 
     name
+}
+
+fn handle_command(input: String) -> String {
+
+    if !input.starts_with('/') {
+        return input;
+    }
+
+    let potential_command = input.replace("\n", " ");
+    let parts = potential_command.split(" ").collect::<Vec<&str>>();
+
+    match parts[0] {
+        "/paste" => {
+            let mut clipboard = Clipboard::new().unwrap();
+            return clipboard.get_text().unwrap();
+        }
+        _ => input,
+    }
 }

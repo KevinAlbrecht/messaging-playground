@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
     sync::{
         broadcast::{self, Receiver, Sender},
@@ -70,6 +70,7 @@ fn handle_new_client(
                         Ok(len) => {
                             let received = message::Message::decode(&read_buffer[..len]).unwrap();
                             println!("{}: {}", addr,received.message);
+
                             let trimmed = received.message.trim().to_string();
 
                             if !trimmed.starts_with("/"){
