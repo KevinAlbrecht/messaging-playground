@@ -23,26 +23,24 @@ const QUEUE_SIZE: usize = 16;
 
 #[tokio::main]
 async fn main() {
-    let set_username_line: String = ask_username();
-
     let mut stream = TcpStream::connect(TCP_ADDR).await.unwrap();
     let (reader, mut writer) = stream.split();
     let (tx, rx) = mpsc::channel(QUEUE_SIZE);
 
-    let set_username_command = message::Message {
+    let set_username_line: String = ask_username();
+    let mut buf: Vec<u8> = Vec::new();
+    
+    message::Message {
         message: set_username_line,
         sender: String::new(),
         msg_type: Type::Command as i32,
         recipient: None,
     }
-    .encode(&mut Vec::new())
+    .encode(&mut buf)
     .unwrap();
-    let mut set_username_buf = Vec::new();
-
-    set_username_command.encode(&mut set_username_buf).unwrap();
 
     writer
-        .write_all(&set_username_buf)
+        .write_all(&buf)
         .await
         .expect("Failed to write to stream");
 
